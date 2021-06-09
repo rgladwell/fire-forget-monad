@@ -7,22 +7,27 @@ import cats._
  * effect monads of the same time: one main and one for fire-and-forget processing.
  *
  * When FireForget resolves it assumes the main monad is resolved and returned and the forget monad is started
- * separately (for example, in another thread) but never returned, and it's result is ignored.
+ * separately (for example, in another thread) but never returned, and its result is ignored.
  *
- * DoubleChannel is main biased.
+ * FireForget is main biased.
  *
  * @param main
  * @param forget
  * @tparam F
  * @tparam A
  */
-case class FireForget[F[_], A](main: F[A], forget: F[Unit]) {
+case class FireForget[F[_], A] private (private val main: F[A], private val forget: F[Unit])  {
 
-  def unsafeSyncFireAndForget() = ???
+  def unsafeRunSync()(implicit faf: FireAndForgetSupport[F]): Unit = {
+    faf.forget(forget)
+    faf.fire(main)
+  }
 
 }
 
 object FireForget {
+
+  def pure[F[_], A](a: A)(implicit F: Monad[F]): FireForget[F, A] = FireForget(F.pure(a), F.unit)
 
   implicit def monad[F[_]](implicit F: Monad[F]): Monad[FireForget[F, *]] = new Monad[FireForget[F, *]] {
 
@@ -33,7 +38,8 @@ object FireForget {
 
     override def tailRecM[A, B](a: A)(fe: A => FireForget[F, Either[A, B]]): FireForget[F, B] = {
       val channel = fe(a)
-      val f = F.tailRecM(a) { a: A => channel.main }
+      val f = F.tailRecM(a) { a: A => fe(a).main }
+      // TODO losing forget mutations from fe
       FireForget(f, channel.forget)
     }
   }
